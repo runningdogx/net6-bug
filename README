@@ -1,0 +1,42 @@
+Potential kernel bug.
+
+First saw strangeness doing web stress testing on 2.6.37.
+
+Then I noticed it happened on both nginx w/php-fpm and apache w/mod_php.
+
+Then I noticed it did not cause problems using the servers' IPv4 addresses.
+
+So I wrote this ruby semi-minimal test case.
+
+
+The script tcp6br.rb basically spawns two threads, one server one client.
+It continuously connects from client to server, and does some trivial file
+access, while the main thread counts lines in /proc/net/tcp6
+
+* Typical output I'm seeing is in the file "sample-tcp6br-output.txt"
+* Kernel config is in the file "kernel-config"
+* Sample output from /proc/net/tcp6 during one of the glitches is in
+  the file "tcp6-repeat-sample.txt", where aside from the index in column
+  1, a small number of entries (in time-wait) seem to repeat.
+
+Bug does NOT trigger:
+ - using IPv4 instead
+ - using localhost (::1)
+
+Unknown if the /tmp file read affects things.  Initially I thought it did,
+but I've reproduced it a few times without that.  Then I couldn't reproduce
+easily during another test run, so I added the file access back in.
+
+
+Kernel (userland distro) - Status
+------------------------   -----------
+
+2.6.37 (gentoo, 64-bit) - reproducible
+
+2.6.38-rc1-next-20110121 (Ubuntu 10.10 64-bit) - reproducible
+2.6.37 (Ubuntu 10.10 64-bit) - reproducible
+2.6.36 (Ubuntu 10.10 64-bit) -reproducible
+2.6.35 (Ubuntu 10.10 64-bit) - NOT reproducible
+
+2.6.37 (Ubuntu 10.10 32-bit) - not able to reproduce
+2.6.38-rc1 (Ubuntu 10.10 32-bit) - not able to reproduce
