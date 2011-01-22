@@ -15,6 +15,8 @@ access, while the main thread counts lines in /proc/net/tcp6
 
 * Typical output I'm seeing is in the file "sample-tcp6br-output.txt"
 * Kernel config is in the file "kernel-config"
+* Sample kernel logs during one of the /proc/net/tcp6 glitches is in
+  the file "kernel-sample.log"
 * Sample output from /proc/net/tcp6 during one of the glitches is in
   the file "tcp6-repeat-sample.txt", where aside from the index in column
   1, a small number of entries (in time-wait) seem to repeat.
