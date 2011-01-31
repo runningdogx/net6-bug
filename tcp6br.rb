@@ -1,71 +1,118 @@
-#!/usr/bin/ruby
+#!/usr/bin/env ruby
 
-# This script triggers a misbehavior/bug on my linux 2.6.37.
-# It's been modified to do everything itself, but initially I would watch
-# tcp6 connections in another window with
-# while [ 1 ]; do wc -l /proc/net/tcp6; done
+# This script triggers misbehavior on my linux 2.6.38-rc2+.
 
 require 'socket'
 
-# set this to any link-local or global ipv6 address on the host, but not ::1
-host = "fc00::4"
-#host = "::1" # doesn't trigger bug
-#host = "192.168.1.4" # ipv4 doesn't trigger bug - if you try, change /proc/net/tcp6 to /proc/net/tcp
-port = "2071"	# any port
+host = "::1"    # default host
+port = "11011"    # default port
+delay = 5    # seconds per loop
 
-filename = "/tmp/bug-tcp6-read-source"
+host = ARGV[0] if ARGV.length > 0
+port = ARGV[1] if ARGV.length > 1
+
+puts
+puts "Usage: ./tcp6br.rb <bindip> <bindport>"
+puts "If you're not root, you'll need to enable tcp_tw_recycle yourself"
+#`echo 0 > /proc/sys/net/ipv4/tcp_syncookies`
+`echo 1 > /proc/sys/net/ipv4/tcp_tw_recycle`
 
 begin
-	server = TCPServer.open(host, port)
+    server = TCPServer.open(host, port)
 rescue
-	next
-end while server.nil?
+    puts "Could not establish listening socket on [#{host}]:#{port}"
+    exit
+end
 
 port = server.addr[1]
 addrs = server.addr[2..-1].uniq
-puts "Server listening on #{addrs.map{|a|"[#{a}]:#{port}"}.join(' ')}"
+#puts "Server listening on #{addrs.map{|a|"[#{a}]:#{port}"}.join(' ')}"
+protonum = server.addr[0] == "AF_INET" ? "4" : "6" #host.include?(":") ? "6" : "4"
+puts "Server listening on [#{host}]:#{port} (tcp#{protonum})"
+puts
 
-File.open(filename, "w") {|h|
-	h.puts "Sample content"
-}
 
 Thread.start do
-	# Server thread
-	loop do
-		begin
-			socket = server.accept
-		rescue
-		ensure
-			begin
-			socket.close if not socket.nil?
-			rescue
-			end
-		end
-	end
+    # Server thread
+    loop do
+        begin
+            socket = server.accept
+        rescue
+        ensure
+            begin
+            socket.close if not socket.nil?
+            rescue
+            end
+        end
+    end
 end
 
 Thread.start do
-	loop do
-		begin
-			socket = TCPSocket.new(host, port)
-		rescue
-		ensure
-			begin
-			socket.close if not socket.nil?
-			rescue
-			end
-		end
-
-		# This file access *seems* to trigger the bug faster.
-		File.open(filename, "r") {|h|
-			h.read
-		}
-	end
+    loop do
+        begin
+            socket = TCPSocket.new(host, port)
+        rescue
+        ensure
+            begin
+                socket.close if not socket.nil?
+            rescue
+            end
+        end
+    end
 end
+
+# Find a port that's not connectable, and test that tcp6 works
+testport = 55555
+closedport = false
+begin
+    testsock = TCPSocket.new(host, testport)
+    testsock.close if not testsock.nil?
+    testport += 1
+    next
+rescue Errno::ECONNREFUSED
+    closedport = true
+rescue Errno::ENETUNREACH
+    puts "[tcp#{protonum}] stack is broken!  #{$!}"
+    exit
+ensure
+    begin testsock.close if not testsock.nil?
+    rescue
+    end
+end while not closedport
+
+puts "Chose (closed) port #{testport} to test that stack returns connection refused."
+
+matchstr = "#{host}:#{port}"
 
 loop do
-	out = `wc -l /proc/net/tcp6`.split
-	puts Time.now.strftime("%H:%M:%S") + "\t " + out[1] + " lines: " + out[0]
-	sleep 1
+    sleep delay
+
+    collate = Hash.new(0)
+    listeners = Hash.new
+    `netstat -an -#{protonum} -t | tail -n +3`.each_line do |line|
+        proto,  recv, send, local, remote, state = line.split
+        if remote == matchstr then
+            collate[state] += 1
+        end
+    end
+
+    puts Time.now.strftime("%H:%M:%S") +
+        "  SYN_S:#{collate["SYN_SENT"]}" +
+        "  SYN_R:#{collate["SYN_RECV"]}" +
+        "  TWAIT:#{collate["TIME_WAIT"]}" +
+        "  FW1:#{collate["FIN_WAIT1"]}" +
+        "  FW2:#{collate["FIN_WAIT2"]}" +
+        "  CLOSING:#{collate["CLOSING"]}" +
+        "  LACK:#{collate["LAST_ACK"]}"
+    begin
+        socket = TCPSocket.new(host, testport)
+    rescue Errno::ECONNREFUSED
+        next
+    rescue Errno::ETIMEDOUT
+        puts "!! TCP SOCKET TIMED OUT CONNECTING TO A LOCAL CLOSED PORT"
+    #rescue Errno::ENETUNREACH
+    rescue
+        puts "[tcp#{protonum}] #{$!}"
+    end
 end
 

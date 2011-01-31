@@ -1,44 +1,19 @@
-Potential kernel bug.
+Last tested on 2.6.38-rc2+ 70d1f365568e0cdbc9f4ab92428e1830fdb09ab0
 
-First saw strangeness doing web stress testing on 2.6.37.
-
-Then I noticed it happened on both nginx w/php-fpm and apache w/mod_php.
-
-Then I noticed it did not cause problems using the servers' IPv4 addresses.
-
-So I wrote this ruby semi-minimal test case.
-
+tcp_tw_recycle seems to break ipv6 badly.
 
 The script tcp6br.rb basically spawns two threads, one server one client.
-It continuously connects from client to server, and does some trivial file
-access, while the main thread counts lines in /proc/net/tcp6
-
-* Typical output I'm seeing is in the file "sample-tcp6br-output.txt"
-* Kernel config is in the file "kernel-config"
-* Sample kernel logs during one of the /proc/net/tcp6 glitches is in
-  the file "kernel-sample.log"
-* Sample output from /proc/net/tcp6 during one of the glitches is in
-  the file "tcp6-repeat-sample.txt", where aside from the index in column
-  1, a small number of entries (in time-wait) seem to repeat.
-
-Bug does NOT trigger:
- - using IPv4 instead
- - using localhost (::1)
-
-Unknown if the /tmp file read affects things.  Initially I thought it did,
-but I've reproduced it a few times without that.  Then I couldn't reproduce
-easily during another test run, so I added the file access back in.
+It continuously connects from client to server, and does some checking
+outside of those threads to try to spot strange behavior.
 
 
-Kernel (userland distro) - Status
-------------------------   -----------
+After several minutes, it seems to fubar the tcp6 layer.
 
-2.6.37 (gentoo, 64-bit) - reproducible
+I observer intermittent net unreachable errors, and after a few minutes, usually <10min, the test that connects to the closed port starts timing out.  At that stage, the tcp6 layer seems to be completely hosed.
 
-2.6.38-rc1-next-20110121 (Ubuntu 10.10 64-bit) - reproducible
-2.6.37 (Ubuntu 10.10 64-bit) - reproducible
-2.6.36 (Ubuntu 10.10 64-bit) -reproducible
-2.6.35 (Ubuntu 10.10 64-bit) - NOT reproducible
+I have yet to see any net unreachable or connect timeout errors from tcp4 under the same conditions.
 
-2.6.37 (Ubuntu 10.10 32-bit) - not able to reproduce
-2.6.38-rc1 (Ubuntu 10.10 32-bit) - not able to reproduce
+compare:
+ ruby tcp6br.rb ::1 5555
+ ruby tcp6br.rb 127.0.0.1 5555
+
